@@ -36,7 +36,7 @@
   let level = 1;
   let score = 0;
   let streak = 0;
-  let countGuess = 0;
+  let countGuess: number | "" = 0;
   let activeRunId: string | null = null;
   let pendingRunPromise: Promise<string | null> | null = null;
   let round: Round | null = null;
@@ -317,6 +317,12 @@
     selected = next;
   }
 
+  function clearDefaultCountGuess() {
+    if (countGuess === 0) {
+      countGuess = "";
+    }
+  }
+
   function isTarget(index: number, currentRound: Round | null): boolean {
     return Boolean(currentRound?.pattern.includes(index));
   }
@@ -477,6 +483,7 @@
         min="0"
         bind:value={countGuess}
         aria-label="Cubes"
+        on:focus={clearDefaultCountGuess}
       >
       <button class="primary-button submit-button" type="button" on:click={submitAnswer}>Submit</button>
     </section>

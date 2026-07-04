@@ -85,7 +85,13 @@ test("moves from preview to a separate count submit screen", async ({ page }) =>
   await expect(page.locator(".block.is-active")).toHaveCount(4);
 
   await expect(page.getByRole("button", { name: "Submit" })).toBeVisible({ timeout: 4000 });
-  await expect(page.getByRole("spinbutton", { name: "Cubes" })).toBeVisible();
+  const countInput = page.getByRole("spinbutton", { name: "Cubes" });
+  await expect(countInput).toBeVisible();
+  await expect(countInput).toHaveValue("0");
+  await countInput.click();
+  await expect(countInput).toHaveValue("");
+  await page.keyboard.type("4");
+  await expect(countInput).toHaveValue("4");
   await expect(page.locator(".board")).toHaveCount(0);
   await expectViewportCanvas(page);
   await expectInsideViewport(page, ".submit-button");

@@ -41,6 +41,7 @@ describe("round evaluation", () => {
 
     expect(evaluateCount(7, 5).correct).toBe(false);
     expect(evaluateCount(7, "x").guess).toBeNull();
+    expect(evaluateCount(7, "")).toMatchObject({ correct: false, difference: 7, guess: 0 });
   });
 
   it("evaluates exact pattern reconstruction", () => {

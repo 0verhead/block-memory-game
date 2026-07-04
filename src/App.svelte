@@ -269,7 +269,6 @@
   async function submitAnswer() {
     if (phase === "gameover") {
       resetRun("completed");
-      startRound();
       return;
     }
 
@@ -388,29 +387,27 @@
   function getPrimaryLabel(currentPhase: Phase, evaluation: EvaluationState | null): string {
     if (currentPhase === "preview") return "Watch";
     if (currentPhase === "input") return "Submit";
-    if (currentPhase === "gameover") return "Restart";
+    if (currentPhase === "gameover") return "New Game";
     if (currentPhase === "reveal" && evaluation?.trainingRetry) return "Retry";
     if (currentPhase === "reveal") return "Next";
     return "Start";
   }
 </script>
 
-<main class="app-shell">
-  <header class="topbar" aria-label="Game status">
-    <div class="brand">
-      <span class="brand-mark" aria-hidden="true"></span>
-      <h1>Block Memory</h1>
-    </div>
-    <div class="stats">
-      <span><strong>{score}</strong><small>Score</small></span>
-      <span><strong>{level}</strong><small>Level</small></span>
-      <span><strong>{streak}</strong><small>Streak</small></span>
-      <span><strong>{bestScore}</strong><small>Best</small></span>
-    </div>
-  </header>
+<main class={`game-shell phase-${phase}`}>
+  <div class="mini-hud" aria-label="Game status">
+    <span><strong>{score}</strong><small>Score</small></span>
+    <span><strong>{level}</strong><small>Level</small></span>
+    <span><strong>{streak}</strong><small>Streak</small></span>
+  </div>
 
-  <section class="playfield" aria-label="Block memory game">
-    <aside class="controls" aria-label="Game controls">
+  {#if phase === "ready"}
+    <section class="screen ready-screen" aria-label="Start screen">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <h1>Block Memory</h1>
+      </div>
+
       <div class="mode-switch" role="tablist" aria-label="Mode">
         <button
           class:is-active={mode === MODES.COUNT}
@@ -432,60 +429,85 @@
         </button>
       </div>
 
-      <div class="level-readout">
-        <span>{phaseLabel}</span>
-        <strong>{currentConfig.rows}x{currentConfig.cols} / {(currentConfig.previewMs / 1000).toFixed(1)}s</strong>
-      </div>
-
       <label class="training-toggle">
         <input type="checkbox" checked={training} on:change={toggleTraining}>
         <span>Training</span>
       </label>
 
-      {#if mode === MODES.COUNT}
-        <div class="count-entry">
-          <label for="countGuess">Cubes</label>
-          <div class="number-row">
-            <button type="button" aria-label="Decrease guess" disabled={phase !== "input"} on:click={() => (countGuess = Math.max(0, countGuess - 1))}>-</button>
-            <input id="countGuess" type="number" inputmode="numeric" min="0" bind:value={countGuess} disabled={phase !== "input"}>
-            <button type="button" aria-label="Increase guess" disabled={phase !== "input"} on:click={() => (countGuess += 1)}>+</button>
-          </div>
-        </div>
-      {:else}
-        <div class="pattern-entry">
-          <div class="pattern-count">{selectedCount} selected</div>
-          <button type="button" class="secondary-button" disabled={phase !== "input" || selectedCount === 0} on:click={() => (selected = new Set())}>Clear</button>
-        </div>
-      {/if}
+      <button class="primary-button start-button" type="button" on:click={submitAnswer}>Start</button>
 
-      <div class="actions">
-        <button class="primary-button" type="button" disabled={phase === "preview"} on:click={submitAnswer}>{primaryLabel}</button>
-        <button class="secondary-button" type="button" on:click={() => resetRun("abandoned")}>Reset</button>
+      <div class="ready-meta">
+        <span>{modeNames[mode]} Mode</span>
+        <span>{currentConfig.activeCount} cubes</span>
+        <span>Best {bestScore}</span>
       </div>
-
-      <output class:error={storageState === "error"} class="result" aria-live="polite">{resultText}</output>
-
-      <div class="history">
-        {#if storageState === "loading"}
-          <span>Loading</span>
-          <span>local</span>
-          <span>history</span>
-        {:else if storageState === "error"}
-          <span>Local</span>
-          <span>history</span>
-          <span>off</span>
-        {:else}
-          <span>{stats.totalRuns} runs</span>
-          <span>{stats.totalRounds} rounds</span>
-          <span>{stats.trainingRounds} training</span>
-        {/if}
-      </div>
-    </aside>
-
-    <section class="board-wrap" aria-label="Memory board">
-      <div class="arena-hud" aria-live="polite">
-        <span>{phaseLabel}</span>
+    </section>
+  {:else if phase === "preview"}
+    <section class="screen board-screen" aria-label="Preview board">
+      <div class="screen-label" aria-live="polite">
+        <span>Memorize</span>
         <strong>{currentConfig.activeCount} cubes</strong>
+      </div>
+      <div
+        class="board phase-preview"
+        aria-label="Block grid"
+        style={`--rows: ${currentConfig.rows}; --cols: ${currentConfig.cols};`}
+      >
+        {#each Array(currentConfig.totalCells) as _, index}
+          <button
+            type="button"
+            class={getBlockClass(index, phase, mode, round, selected, currentConfig)}
+            aria-label={`Block ${index + 1}`}
+            disabled
+          ></button>
+        {/each}
+      </div>
+    </section>
+  {:else if phase === "input" && mode === MODES.COUNT}
+    <section class="screen answer-screen" aria-label="Count answer">
+      <div class="screen-label">
+        <span>Answer</span>
+        <strong>How many cubes?</strong>
+      </div>
+      <input
+        id="countGuess"
+        class="count-input"
+        type="number"
+        inputmode="numeric"
+        min="0"
+        bind:value={countGuess}
+        aria-label="Cubes"
+      >
+      <button class="primary-button submit-button" type="button" on:click={submitAnswer}>Submit</button>
+    </section>
+  {:else if phase === "input" && mode === MODES.PATTERN}
+    <section class="screen pattern-screen" aria-label="Pattern answer">
+      <div class="screen-label">
+        <span>Rebuild</span>
+        <strong>{selectedCount}/{currentConfig.activeCount} selected</strong>
+      </div>
+      <div
+        class="board phase-input"
+        aria-label="Block grid"
+        style={`--rows: ${currentConfig.rows}; --cols: ${currentConfig.cols};`}
+      >
+        {#each Array(currentConfig.totalCells) as _, index}
+          <button
+            type="button"
+            class={getBlockClass(index, phase, mode, round, selected, currentConfig)}
+            aria-label={`Block ${index + 1}`}
+            aria-pressed={selected.has(index)}
+            on:click={() => toggleBlock(index)}
+          ></button>
+        {/each}
+      </div>
+      <button class="primary-button submit-button" type="button" on:click={submitAnswer}>Submit</button>
+    </section>
+  {:else}
+    <section class="screen result-screen" aria-label="Round result">
+      <div class="screen-label">
+        <span>{phaseLabel}</span>
+        <strong>{resultText}</strong>
       </div>
       <div
         class={`board phase-${phase}`}
@@ -497,14 +519,13 @@
             type="button"
             class={getBlockClass(index, phase, mode, round, selected, currentConfig)}
             aria-label={`Block ${index + 1}`}
-            aria-pressed={selected.has(index)}
-            disabled={mode !== MODES.PATTERN || phase !== "input"}
-            on:click={() => toggleBlock(index)}
+            disabled
           ></button>
         {/each}
       </div>
+      <button class="primary-button submit-button" type="button" on:click={submitAnswer}>{primaryLabel}</button>
     </section>
-  </section>
+  {/if}
 </main>
 
 <style>
@@ -975,6 +996,232 @@
     .topbar {
       gap: 0.7rem;
       padding: 0.7rem 0.85rem;
+    }
+  }
+
+  .game-shell {
+    position: relative;
+    display: grid;
+    min-height: 100svh;
+    overflow-x: hidden;
+    color: var(--ink);
+    background:
+      radial-gradient(circle at 50% 28%, rgba(0, 229, 255, 0.18), transparent 17rem),
+      radial-gradient(circle at 50% 78%, rgba(255, 196, 77, 0.18), transparent 20rem),
+      linear-gradient(180deg, rgba(2, 9, 14, 0.1), rgba(2, 9, 14, 0.72));
+  }
+
+  .mini-hud {
+    position: fixed;
+    z-index: 10;
+    top: max(0.75rem, env(safe-area-inset-top));
+    left: 50%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(4.6rem, 1fr));
+    gap: 0.35rem;
+    width: min(27rem, calc(100vw - 1.5rem));
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .mini-hud span {
+    display: grid;
+    gap: 0.05rem;
+    min-height: 2.8rem;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(2, 12, 18, 0.72);
+    box-shadow: 0 0.7rem 1.8rem rgba(0, 0, 0, 0.24);
+  }
+
+  .mini-hud strong {
+    font-size: 1.08rem;
+    line-height: 1;
+  }
+
+  .mini-hud small {
+    color: var(--muted);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+  }
+
+  .screen {
+    display: grid;
+    width: min(100vw, 62rem);
+    min-height: 100svh;
+    margin-inline: auto;
+    padding: max(4.6rem, env(safe-area-inset-top)) clamp(1rem, 4vw, 2.5rem) max(1rem, env(safe-area-inset-bottom));
+    place-items: center;
+  }
+
+  .ready-screen,
+  .answer-screen {
+    align-content: center;
+    gap: 1rem;
+    width: min(100vw, 32rem);
+  }
+
+  .board-screen,
+  .pattern-screen,
+  .result-screen {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: clamp(0.8rem, 2vh, 1.2rem);
+  }
+
+  .brand-lockup {
+    display: grid;
+    justify-items: center;
+    gap: 0.75rem;
+  }
+
+  .brand-lockup .brand-mark {
+    width: 3.25rem;
+    height: 3.25rem;
+  }
+
+  .brand-lockup h1 {
+    margin: 0;
+    text-align: center;
+    font-size: clamp(2.2rem, 8vw, 4.5rem);
+    line-height: 0.95;
+  }
+
+  .screen-label {
+    display: grid;
+    justify-items: center;
+    gap: 0.18rem;
+    text-align: center;
+    text-transform: uppercase;
+  }
+
+  .screen-label span {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 850;
+  }
+
+  .screen-label strong {
+    color: var(--ink);
+    font-size: clamp(1.35rem, 4vw, 2.35rem);
+    line-height: 1.08;
+  }
+
+  .ready-meta {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+  }
+
+  .ready-meta span {
+    padding: 0.4rem 0.55rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(2, 12, 18, 0.5);
+  }
+
+  .mode-switch {
+    width: min(100%, 22rem);
+  }
+
+  .mode-switch button,
+  .primary-button {
+    min-height: 3.1rem;
+  }
+
+  .training-toggle {
+    width: min(100%, 22rem);
+  }
+
+  .start-button,
+  .submit-button {
+    width: min(100%, 22rem);
+  }
+
+  .count-input {
+    width: min(100%, 15rem);
+    min-height: 5rem;
+    font-size: clamp(2.2rem, 12vw, 4rem);
+    border: 2px solid rgba(255, 255, 255, 0.24);
+    background: rgba(0, 0, 0, 0.34);
+  }
+
+  .board {
+    width: min(78svmin, calc(var(--cols) * 5.7rem), 48rem);
+    align-self: center;
+  }
+
+  .pattern-screen .board {
+    width: min(68svmin, calc(var(--cols) * 5.2rem), 42rem);
+  }
+
+  .result-screen .board {
+    width: min(58svmin, calc(var(--cols) * 4.5rem), 34rem);
+  }
+
+  .result-screen .screen-label strong {
+    max-width: 28rem;
+  }
+
+  @media (max-width: 720px) {
+    .mini-hud {
+      position: static;
+      width: auto;
+      padding: 0.65rem 0.75rem 0;
+      transform: none;
+    }
+
+    .game-shell {
+      align-content: start;
+    }
+
+    .screen {
+      min-height: calc(100svh - 3.45rem);
+      padding: 0.8rem 0.9rem max(0.8rem, env(safe-area-inset-bottom));
+    }
+
+    .ready-screen,
+    .answer-screen {
+      gap: 0.8rem;
+    }
+
+    .board {
+      width: min(92vw, 25rem);
+    }
+
+    .pattern-screen .board,
+    .result-screen .board {
+      width: min(90vw, 24rem);
+    }
+
+    .brand-lockup h1 {
+      font-size: clamp(2rem, 12vw, 3.3rem);
+    }
+  }
+
+  @media (max-height: 620px) and (orientation: landscape) {
+    .screen {
+      padding-top: 0.75rem;
+      min-height: 100svh;
+    }
+
+    .mini-hud {
+      position: fixed;
+      left: 0.75rem;
+      top: 0.75rem;
+      width: 15rem;
+      transform: none;
+    }
+
+    .board {
+      width: min(68svh, 29rem);
+    }
+
+    .ready-screen,
+    .answer-screen {
+      padding-left: 17rem;
     }
   }
 </style>

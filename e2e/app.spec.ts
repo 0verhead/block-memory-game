@@ -13,3 +13,13 @@ test("starts in count mode and can switch to pattern training", async ({ page })
   await expect(page.getByText("Pattern Mode")).toBeVisible();
   await expect(page.getByText("0 selected")).toBeVisible();
 });
+
+test("shows active blocks immediately after start", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Start" }).click();
+
+  await expect(page.getByText("Preview").first()).toBeVisible();
+  await expect(page.locator(".block.is-active")).toHaveCount(4);
+  await expect(page.locator(".board")).toBeInViewport();
+});

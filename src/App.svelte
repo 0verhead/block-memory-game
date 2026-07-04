@@ -38,6 +38,7 @@
   let streak = 0;
   let countGuess = 0;
   let activeRunId: string | null = null;
+  let pendingRunPromise: Promise<string | null> | null = null;
   let round: Round | null = null;
   let selected = new Set<number>();
   let lastEvaluation: EvaluationState | null = null;
@@ -94,39 +95,89 @@
     };
   }
 
-  async function ensureRun() {
-    if (!activeRunId) {
-      activeRunId = await startRun(mode, training);
-      await refreshStats();
-    }
+  function reportStorageError(error: unknown, fallback: string) {
+    storageState = "error";
+    storageError = error instanceof Error ? error.message : fallback;
   }
 
-  async function startRound() {
-    try {
-      await ensureRun();
-      clearPreviewTimer();
-      round = createRound();
-      selected = new Set();
-      lastEvaluation = null;
-      phase = "preview";
-      countGuess = 0;
-
-      previewTimer = window.setTimeout(() => {
-        phase = "input";
-        previewTimer = null;
-      }, round.config.previewMs);
-    } catch (error) {
-      storageState = "error";
-      storageError = error instanceof Error ? error.message : "Unable to start run";
+  function beginRunPersistence() {
+    if (activeRunId || pendingRunPromise) {
+      return;
     }
+
+    const runMode = mode;
+    const runTraining = training;
+    pendingRunPromise = startRun(runMode, runTraining)
+      .then(async (runId) => {
+        activeRunId = runId;
+        storageState = "ready";
+        storageError = "";
+        await refreshStats();
+        return runId;
+      })
+      .catch((error) => {
+        reportStorageError(error, "Unable to save run history");
+        return null;
+      })
+      .finally(() => {
+        pendingRunPromise = null;
+      });
   }
 
-  async function resetRun(status: "abandoned" | "completed" = "abandoned", nextMode: GameMode = mode) {
-    clearPreviewTimer();
+  async function resolveRunIdForPersistence(): Promise<string | null> {
     if (activeRunId) {
-      await finishRun(activeRunId, status, score, Math.max(1, level));
+      return activeRunId;
     }
+
+    if (!pendingRunPromise) {
+      beginRunPersistence();
+    }
+
+    return pendingRunPromise;
+  }
+
+  function startRound() {
+    beginRunPersistence();
+    clearPreviewTimer();
+    round = createRound();
+    selected = new Set();
+    lastEvaluation = null;
+    phase = "preview";
+    countGuess = 0;
+
+    previewTimer = window.setTimeout(() => {
+      phase = "input";
+      previewTimer = null;
+    }, round.config.previewMs);
+  }
+
+  function finishPersistedRun(status: "abandoned" | "completed" | "failed", finalScore: number, highestLevel: number) {
+    const runId = activeRunId;
+    const runPromise = pendingRunPromise;
     activeRunId = null;
+    pendingRunPromise = null;
+
+    if (runId) {
+      void finishRun(runId, status, finalScore, highestLevel)
+        .then(refreshStats)
+        .catch((error) => reportStorageError(error, "Unable to save run history"));
+      return;
+    }
+
+    if (runPromise) {
+      void runPromise
+        .then((resolvedRunId) => {
+          if (!resolvedRunId) return undefined;
+          return finishRun(resolvedRunId, status, finalScore, highestLevel);
+        })
+        .then(refreshStats)
+        .catch((error) => reportStorageError(error, "Unable to save run history"));
+    }
+  }
+
+  function resetRun(status: "abandoned" | "completed" = "abandoned", nextMode: GameMode = mode) {
+    clearPreviewTimer();
+    finishPersistedRun(status, score, Math.max(1, level));
     mode = nextMode;
     phase = "ready";
     level = 1;
@@ -136,14 +187,56 @@
     round = null;
     selected = new Set();
     lastEvaluation = null;
-    await refreshStats();
   }
 
-  async function finishCurrentRound(evaluation: RoundEvaluation) {
-    if (!round || !activeRunId) {
+  function persistFinishedRound(
+    runSnapshot: Round,
+    completedLevel: number,
+    scoreAfter: number,
+    streakAfter: number,
+    selectedValues: number[],
+    guess: number | null,
+    evaluation: RoundEvaluation,
+    statusAfterRound: "active" | "failed"
+  ) {
+    void resolveRunIdForPersistence()
+      .then(async (runId) => {
+        if (!runId) {
+          return;
+        }
+
+        await recordRound({
+          runId,
+          mode,
+          training,
+          level: completedLevel,
+          scoreAfter,
+          streakAfter,
+          config: runSnapshot.config,
+          pattern: runSnapshot.pattern,
+          selected: selectedValues,
+          guess,
+          evaluation,
+        });
+
+        if (statusAfterRound === "failed") {
+          await finishRun(runId, "failed", scoreAfter, completedLevel);
+          if (activeRunId === runId) {
+            activeRunId = null;
+          }
+        }
+
+        await refreshStats();
+      })
+      .catch((error) => reportStorageError(error, "Unable to save round history"));
+  }
+
+  function finishCurrentRound(evaluation: RoundEvaluation) {
+    if (!round) {
       return;
     }
 
+    const runSnapshot = round;
     const completedLevel = level;
     const selectedValues = Array.from(selected).sort((a, b) => a - b);
     const guess = mode === MODES.COUNT ? Number(countGuess) : null;
@@ -170,37 +263,18 @@
 
     lastEvaluation = nextEvaluation;
 
-    await recordRound({
-      runId: activeRunId,
-      mode,
-      training,
-      level: completedLevel,
-      scoreAfter: score,
-      streakAfter: streak,
-      config: round.config,
-      pattern: round.pattern,
-      selected: selectedValues,
-      guess,
-      evaluation,
-    });
-
-    if (statusAfterRound === "failed") {
-      await finishRun(activeRunId, "failed", score, completedLevel);
-      activeRunId = null;
-    }
-
-    await refreshStats();
+    persistFinishedRound(runSnapshot, completedLevel, score, streak, selectedValues, guess, evaluation, statusAfterRound);
   }
 
   async function submitAnswer() {
     if (phase === "gameover") {
-      await resetRun("completed");
-      await startRound();
+      resetRun("completed");
+      startRound();
       return;
     }
 
     if (phase === "ready" || phase === "reveal") {
-      await startRound();
+      startRound();
       return;
     }
 
@@ -209,24 +283,24 @@
     }
 
     if (mode === MODES.COUNT) {
-      await finishCurrentRound(evaluateCount(round.config.activeCount, countGuess));
+      finishCurrentRound(evaluateCount(round.config.activeCount, countGuess));
       return;
     }
 
-    await finishCurrentRound(evaluatePattern(round.pattern, selected));
+    finishCurrentRound(evaluatePattern(round.pattern, selected));
   }
 
   async function switchMode(nextMode: GameMode) {
     if (nextMode === mode) {
       return;
     }
-    await resetRun("abandoned", nextMode);
+    resetRun("abandoned", nextMode);
   }
 
   async function toggleTraining() {
     training = !training;
     if (phase !== "ready") {
-      await resetRun("abandoned");
+      resetRun("abandoned");
     }
   }
 
@@ -244,25 +318,32 @@
     selected = next;
   }
 
-  function isTarget(index: number): boolean {
-    return Boolean(round?.pattern.includes(index));
+  function isTarget(index: number, currentRound: Round | null): boolean {
+    return Boolean(currentRound?.pattern.includes(index));
   }
 
-  function getBlockClass(index: number): string {
-    const target = isTarget(index);
-    const chosen = selected.has(index);
+  function getBlockClass(
+    index: number,
+    currentPhase: Phase,
+    currentMode: GameMode,
+    currentRound: Round | null,
+    currentSelected: Set<number>,
+    config: LevelConfig
+  ): string {
+    const target = isTarget(index, currentRound);
+    const chosen = currentSelected.has(index);
     const classes = ["block"];
 
-    if (index % currentConfig.cols === currentConfig.cols - 1) classes.push("is-edge-right");
-    if (index >= currentConfig.totalCells - currentConfig.cols) classes.push("is-edge-bottom");
-    if (phase === "preview" && target) classes.push("is-active");
-    if (phase === "input" && chosen) classes.push("is-selected");
+    if (index % config.cols === config.cols - 1) classes.push("is-edge-right");
+    if (index >= config.totalCells - config.cols) classes.push("is-edge-bottom");
+    if (currentPhase === "preview" && target) classes.push("is-active");
+    if (currentPhase === "input" && chosen) classes.push("is-selected");
 
-    if ((phase === "reveal" || phase === "gameover") && round) {
+    if ((currentPhase === "reveal" || currentPhase === "gameover") && currentRound) {
       if (target && chosen) classes.push("is-correct");
       else if (target) classes.push("is-missed");
       else if (chosen) classes.push("is-wrong");
-      if (mode === MODES.COUNT && target) classes.push("is-active");
+      if (currentMode === MODES.COUNT && target) classes.push("is-active");
     }
 
     return classes.join(" ");
@@ -285,8 +366,8 @@
     currentScore: number,
     isTraining: boolean
   ): string {
-    if (currentStorageState === "error") return currentStorageError;
     if (!evaluation) return `${modeNames[currentMode]} Mode`;
+    if (currentStorageState === "error" && currentStorageError) return currentStorageError;
     if (currentPhase === "gameover") return `Final score ${currentScore}`;
 
     if (currentMode === MODES.COUNT) {
@@ -378,7 +459,7 @@
       {/if}
 
       <div class="actions">
-        <button class="primary-button" type="button" disabled={phase === "preview" || storageState === "error"} on:click={submitAnswer}>{primaryLabel}</button>
+        <button class="primary-button" type="button" disabled={phase === "preview"} on:click={submitAnswer}>{primaryLabel}</button>
         <button class="secondary-button" type="button" on:click={() => resetRun("abandoned")}>Reset</button>
       </div>
 
@@ -389,6 +470,10 @@
           <span>Loading</span>
           <span>local</span>
           <span>history</span>
+        {:else if storageState === "error"}
+          <span>Local</span>
+          <span>history</span>
+          <span>off</span>
         {:else}
           <span>{stats.totalRuns} runs</span>
           <span>{stats.totalRounds} rounds</span>
@@ -398,15 +483,19 @@
     </aside>
 
     <section class="board-wrap" aria-label="Memory board">
+      <div class="arena-hud" aria-live="polite">
+        <span>{phaseLabel}</span>
+        <strong>{currentConfig.activeCount} cubes</strong>
+      </div>
       <div
-        class="board"
+        class={`board phase-${phase}`}
         aria-label="Block grid"
         style={`--rows: ${currentConfig.rows}; --cols: ${currentConfig.cols};`}
       >
         {#each Array(currentConfig.totalCells) as _, index}
           <button
             type="button"
-            class={getBlockClass(index)}
+            class={getBlockClass(index, phase, mode, round, selected, currentConfig)}
             aria-label={`Block ${index + 1}`}
             aria-pressed={selected.has(index)}
             disabled={mode !== MODES.PATTERN || phase !== "input"}
@@ -420,19 +509,27 @@
 
 <style>
   .app-shell {
-    display: grid;
-    grid-template-rows: auto 1fr;
-    min-height: 100vh;
+    position: relative;
+    min-height: 100svh;
+    overflow-x: hidden;
+    background:
+      radial-gradient(circle at 50% 18%, rgba(255, 196, 77, 0.14), transparent 22rem),
+      linear-gradient(180deg, rgba(2, 9, 14, 0.18), rgba(2, 9, 14, 0.52));
   }
 
   .topbar {
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    left: 0;
+    right: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 1rem clamp(1rem, 3vw, 2.4rem);
-    border-bottom: 1px solid var(--line);
-    background: rgba(3, 16, 24, 0.72);
+    padding: clamp(0.75rem, 1.6vw, 1rem) clamp(0.85rem, 2.2vw, 1.6rem);
+    border-bottom: 0;
+    background: linear-gradient(180deg, rgba(2, 12, 18, 0.9), rgba(2, 12, 18, 0));
     backdrop-filter: blur(14px);
   }
 
@@ -472,8 +569,8 @@
   .training-toggle,
   .result,
   .history {
-    border: 1px solid var(--line);
-    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.035));
   }
 
   .stats span {
@@ -499,19 +596,29 @@
   }
 
   .playfield {
+    position: relative;
     display: grid;
-    grid-template-columns: minmax(15rem, 20rem) 1fr;
-    min-height: 0;
+    grid-template-areas: "board";
+    min-height: 100svh;
   }
 
   .controls {
+    grid-area: controls;
+    position: absolute;
+    z-index: 5;
+    right: clamp(0.8rem, 2.4vw, 1.8rem);
+    bottom: clamp(0.8rem, 2.4vw, 1.8rem);
+    width: min(27rem, calc(100vw - 1.6rem));
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-    padding: clamp(1rem, 2.4vw, 1.5rem);
-    border-right: 1px solid var(--line);
-    background: var(--panel);
+    gap: 0.85rem;
+    padding: clamp(0.9rem, 2vw, 1.25rem);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background:
+      linear-gradient(180deg, rgba(8, 35, 46, 0.92), rgba(3, 13, 20, 0.94)),
+      var(--panel);
     backdrop-filter: blur(14px);
+    box-shadow: 0 1.2rem 3rem rgba(0, 0, 0, 0.38), 0 0 1.8rem rgba(0, 165, 184, 0.16);
   }
 
   .mode-switch {
@@ -605,9 +712,10 @@
   }
 
   .primary-button {
-    background: var(--amber);
+    background: linear-gradient(180deg, #ffe27c, var(--amber));
     color: #1d1400;
     font-weight: 850;
+    box-shadow: 0 0.75rem 1.6rem rgba(255, 196, 77, 0.22);
   }
 
   .secondary-button {
@@ -646,11 +754,39 @@
   }
 
   .board-wrap {
+    grid-area: board;
     display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
     place-items: center;
+    gap: 0.9rem;
     min-width: 0;
-    min-height: 0;
-    padding: clamp(1rem, 4vw, 3rem);
+    min-height: 100svh;
+    padding: clamp(5.4rem, 9vh, 7rem) clamp(1rem, 4vw, 2.6rem) clamp(8.5rem, 20vh, 12rem);
+  }
+
+  .arena-hud {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.8rem;
+    min-width: min(28rem, 92vw);
+    padding: 0.55rem 0.8rem;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(2, 11, 17, 0.74);
+    box-shadow: 0 0.75rem 1.8rem rgba(0, 0, 0, 0.22);
+    text-transform: uppercase;
+  }
+
+  .arena-hud span {
+    color: var(--muted);
+    font-size: 0.74rem;
+    font-weight: 800;
+  }
+
+  .arena-hud strong {
+    color: var(--amber);
+    font-size: 0.95rem;
+    letter-spacing: 0;
   }
 
   .board {
@@ -659,24 +795,43 @@
     display: grid;
     grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
     grid-template-rows: repeat(var(--rows), minmax(0, 1fr));
-    width: min(92vw, calc(var(--cols) * 5rem), calc((100vh - 8rem) * var(--cols) / var(--rows)));
+    gap: clamp(0.25rem, 0.7vw, 0.48rem);
+    width: min(78vmin, calc(var(--cols) * 5.7rem), 48rem);
     aspect-ratio: var(--cols) / var(--rows);
-    border: 2px solid rgba(255, 255, 255, 0.82);
-    background: rgba(255, 255, 255, 0.72);
-    box-shadow: 0 1.2rem 3rem rgba(0, 0, 0, 0.34), 0 0 2rem rgba(0, 165, 184, 0.32);
+    padding: clamp(0.45rem, 1vw, 0.75rem);
+    border: 3px solid rgba(248, 251, 255, 0.9);
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.03)),
+      #06151d;
+    box-shadow:
+      0 1.4rem 3.5rem rgba(0, 0, 0, 0.46),
+      0 0 0 0.5rem rgba(3, 12, 18, 0.72),
+      0 0 2.4rem rgba(0, 165, 184, 0.45);
+    transition: box-shadow 160ms ease, transform 160ms ease;
+  }
+
+  .board.phase-preview {
+    box-shadow:
+      0 1.4rem 3.5rem rgba(0, 0, 0, 0.46),
+      0 0 0 0.5rem rgba(3, 12, 18, 0.72),
+      0 0 3.2rem rgba(255, 196, 77, 0.45);
+    transform: scale(1.01);
   }
 
   .block {
     position: relative;
     min-width: 0;
     min-height: 0;
-    border-right: 2px solid rgba(255, 255, 255, 0.82);
-    border-bottom: 2px solid rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.34);
     cursor: default;
     background:
-      radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.96), transparent 22%),
-      linear-gradient(135deg, #f9fbfb, var(--cube) 45%, #8e979e);
-    box-shadow: inset 0.45rem 0.45rem 1rem rgba(255, 255, 255, 0.72), inset -0.7rem -0.75rem 1.1rem rgba(15, 25, 32, 0.26);
+      radial-gradient(circle at 28% 21%, rgba(255, 255, 255, 0.98), transparent 21%),
+      linear-gradient(135deg, #ffffff, var(--cube) 44%, #7c878f);
+    box-shadow:
+      inset 0.45rem 0.45rem 1rem rgba(255, 255, 255, 0.72),
+      inset -0.72rem -0.78rem 1.1rem rgba(12, 22, 30, 0.34),
+      0 0.28rem 0 rgba(0, 0, 0, 0.28);
+    transition: background 120ms ease, box-shadow 120ms ease, transform 120ms ease, outline-color 120ms ease;
   }
 
   .block:not(:disabled) {
@@ -684,11 +839,11 @@
   }
 
   .block.is-edge-right {
-    border-right: 0;
+    border-right-color: rgba(255, 255, 255, 0.34);
   }
 
   .block.is-edge-bottom {
-    border-bottom: 0;
+    border-bottom-color: rgba(255, 255, 255, 0.34);
   }
 
   .block::after {
@@ -706,10 +861,15 @@
 
   .block.is-active {
     background:
-      radial-gradient(circle at 50% 45%, rgba(0, 165, 184, 0.95), transparent 26%),
-      radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.18), transparent 40%),
-      linear-gradient(135deg, #02171e, var(--cube-dark) 58%, #0c1117);
-    box-shadow: inset 0.35rem 0.35rem 1rem rgba(0, 165, 184, 0.18), inset -0.6rem -0.7rem 1rem rgba(0, 0, 0, 0.45);
+      radial-gradient(circle at 50% 44%, rgba(255, 255, 255, 0.7), transparent 15%),
+      radial-gradient(circle at 50% 52%, rgba(0, 229, 255, 0.96), transparent 35%),
+      linear-gradient(135deg, #031118, var(--cube-dark) 58%, #04080c);
+    box-shadow:
+      inset 0.35rem 0.35rem 1rem rgba(0, 229, 255, 0.2),
+      inset -0.6rem -0.7rem 1rem rgba(0, 0, 0, 0.45),
+      0 0 0 2px rgba(255, 196, 77, 0.88),
+      0 0 1.35rem rgba(0, 229, 255, 0.85);
+    transform: translateY(-2px);
   }
 
   .block.is-selected {
@@ -742,9 +902,16 @@
   }
 
   @media (max-width: 820px) {
+    .app-shell {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+
     .topbar {
+      position: static;
       align-items: stretch;
       flex-direction: column;
+      background: rgba(2, 12, 18, 0.88);
     }
 
     .brand {
@@ -757,16 +924,31 @@
     }
 
     .playfield {
+      grid-template-areas:
+        "board"
+        "controls";
       grid-template-columns: 1fr;
+      grid-template-rows: auto auto;
+      min-height: auto;
     }
 
     .controls {
-      border-right: 0;
-      border-bottom: 1px solid var(--line);
+      position: static;
+      width: auto;
+      margin: 0 0.85rem 0.85rem;
+      border-right: 1px solid rgba(255, 255, 255, 0.18);
+      border-top: 1px solid var(--line);
+      border-bottom: 0;
     }
 
     .board-wrap {
-      align-items: start;
+      align-items: center;
+      min-height: auto;
+      padding: 1rem 0.85rem 0.85rem;
+    }
+
+    .board {
+      width: min(92vw, 26rem);
     }
   }
 
@@ -777,10 +959,22 @@
 
     .controls {
       gap: 0.8rem;
+      padding: 0.85rem;
     }
 
     .board {
-      width: min(94vw, calc((100vh - 20rem) * var(--cols) / var(--rows)));
+      width: min(92vw, 22.5rem);
+      gap: 0.24rem;
+      padding: 0.42rem;
+    }
+
+    .arena-hud {
+      min-width: min(92vw, 22.5rem);
+    }
+
+    .topbar {
+      gap: 0.7rem;
+      padding: 0.7rem 0.85rem;
     }
   }
 </style>

@@ -1224,4 +1224,226 @@
       padding-left: 17rem;
     }
   }
+
+  /* Viewport game canvas: every phase fits inside the visible screen. */
+  .game-shell {
+    width: 100dvw;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .phase-ready .mini-hud {
+    display: none;
+  }
+
+  .mini-hud {
+    position: absolute;
+    top: max(0.5rem, env(safe-area-inset-top));
+    width: min(22rem, calc(100dvw - 1rem));
+    padding: 0;
+  }
+
+  .mini-hud span {
+    min-height: clamp(2.15rem, 5dvh, 2.65rem);
+  }
+
+  .screen {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    min-height: 0;
+    margin: 0;
+    overflow: hidden;
+    padding:
+      calc(env(safe-area-inset-top) + 3.55rem)
+      clamp(0.75rem, 2.4dvw, 2rem)
+      calc(env(safe-area-inset-bottom) + 0.75rem);
+  }
+
+  .phase-ready .screen {
+    padding-top: max(0.85rem, env(safe-area-inset-top));
+  }
+
+  .ready-screen,
+  .answer-screen {
+    width: 100%;
+    max-width: 32rem;
+    margin-inline: auto;
+    align-content: center;
+    justify-items: center;
+    gap: clamp(0.65rem, 1.8dvh, 1rem);
+  }
+
+  .board-screen,
+  .pattern-screen,
+  .result-screen {
+    width: 100%;
+    grid-template-rows: min-content minmax(0, 1fr) min-content;
+    align-items: center;
+    justify-items: center;
+    gap: clamp(0.45rem, 1.35dvh, 0.95rem);
+  }
+
+  .board-screen {
+    grid-template-rows: min-content minmax(0, 1fr);
+  }
+
+  .brand-lockup {
+    gap: clamp(0.45rem, 1.4dvh, 0.75rem);
+  }
+
+  .brand-lockup .brand-mark {
+    width: clamp(2.3rem, 7dvh, 3.25rem);
+    height: clamp(2.3rem, 7dvh, 3.25rem);
+  }
+
+  .brand-lockup h1 {
+    font-size: clamp(2rem, 8dvw, 4.1rem);
+  }
+
+  .screen-label {
+    max-width: min(34rem, calc(100dvw - 1.5rem));
+  }
+
+  .screen-label strong {
+    font-size: clamp(1.15rem, 4.5dvh, 2.2rem);
+  }
+
+  .mode-switch,
+  .training-toggle,
+  .start-button,
+  .submit-button {
+    width: min(100%, 21rem);
+  }
+
+  .mode-switch button,
+  .primary-button {
+    min-height: clamp(2.65rem, 6dvh, 3.1rem);
+  }
+
+  .training-toggle {
+    min-height: clamp(2.65rem, 6dvh, 3.1rem);
+  }
+
+  .ready-meta {
+    max-width: min(100%, 24rem);
+  }
+
+  .count-input {
+    width: min(82dvw, 14rem);
+    min-height: clamp(3.7rem, 12dvh, 5rem);
+    font-size: clamp(2rem, 8.5dvh, 4rem);
+  }
+
+  .board {
+    --board-v-space: 8.15rem;
+    width: min(calc(100dvw - 1.5rem), calc(100dvh - var(--board-v-space)), calc(var(--cols) * 5.7rem), 48rem);
+    max-width: calc(100dvw - 1.5rem);
+    max-height: calc(100dvh - var(--board-v-space));
+    align-self: center;
+  }
+
+  .pattern-screen .board {
+    --board-v-space: 12rem;
+    width: min(calc(100dvw - 1.5rem), calc(100dvh - var(--board-v-space)), calc(var(--cols) * 5.15rem), 42rem);
+  }
+
+  .result-screen .board {
+    --board-v-space: 12.75rem;
+    width: min(calc(100dvw - 1.5rem), calc(100dvh - var(--board-v-space)), calc(var(--cols) * 4.45rem), 34rem);
+  }
+
+  @media (max-width: 720px) {
+    .mini-hud {
+      position: absolute;
+      left: 50%;
+      top: max(0.45rem, env(safe-area-inset-top));
+      width: min(20rem, calc(100dvw - 0.75rem));
+      transform: translateX(-50%);
+    }
+
+    .game-shell {
+      align-content: stretch;
+    }
+
+    .screen {
+      height: 100%;
+      min-height: 0;
+      padding:
+        calc(env(safe-area-inset-top) + 3.15rem)
+        0.65rem
+        calc(env(safe-area-inset-bottom) + 0.65rem);
+    }
+
+    .phase-ready .screen {
+      padding-top: max(0.75rem, env(safe-area-inset-top));
+    }
+
+    .mini-hud span {
+      min-height: 2.25rem;
+    }
+
+    .mini-hud strong {
+      font-size: 0.95rem;
+    }
+
+    .mini-hud small {
+      font-size: 0.62rem;
+    }
+
+    .board {
+      --board-v-space: 7.35rem;
+      width: min(calc(100dvw - 1rem), calc(100dvh - var(--board-v-space)), 25rem);
+      max-width: calc(100dvw - 1rem);
+      max-height: calc(100dvh - var(--board-v-space));
+    }
+
+    .pattern-screen .board {
+      --board-v-space: 10.9rem;
+      width: min(calc(100dvw - 1rem), calc(100dvh - var(--board-v-space)), 24rem);
+    }
+
+    .result-screen .board {
+      --board-v-space: 11.25rem;
+      width: min(calc(100dvw - 1rem), calc(100dvh - var(--board-v-space)), 22.5rem);
+    }
+  }
+
+  @media (max-height: 620px) and (orientation: landscape) {
+    .mini-hud {
+      width: min(16rem, calc(100dvw - 1rem));
+    }
+
+    .screen {
+      padding:
+        calc(env(safe-area-inset-top) + 3rem)
+        calc(env(safe-area-inset-right) + 0.75rem)
+        calc(env(safe-area-inset-bottom) + 0.65rem)
+        calc(env(safe-area-inset-left) + 0.75rem);
+    }
+
+    .phase-ready .screen {
+      padding-top: max(0.6rem, env(safe-area-inset-top));
+    }
+
+    .ready-screen,
+    .answer-screen {
+      padding-left: calc(env(safe-area-inset-left) + 0.75rem);
+    }
+
+    .brand-lockup h1 {
+      font-size: clamp(1.55rem, 8dvh, 2.65rem);
+    }
+
+    .brand-lockup .brand-mark {
+      width: clamp(2rem, 9dvh, 2.4rem);
+      height: clamp(2rem, 9dvh, 2.4rem);
+    }
+
+    .ready-meta span {
+      padding-block: 0.28rem;
+    }
+  }
 </style>

@@ -22,14 +22,22 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 html {
-  min-height: 100%;
   background: #06131d;
 }
 
 body {
   min-width: 320px;
-  min-height: 100vh;
+  width: 100dvw;
+  height: 100dvh;
   margin: 0;
   color: var(--ink);
   background:
@@ -39,6 +47,13 @@ body {
     radial-gradient(circle at 88% 18%, rgba(181, 167, 255, 0.16), transparent 22rem),
     linear-gradient(145deg, #068ca0, #043449 58%, #06131d);
   background-size: 38px 38px, 38px 38px, auto, auto, auto;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+#app {
+  width: 100dvw;
+  height: 100dvh;
 }
 
 button,

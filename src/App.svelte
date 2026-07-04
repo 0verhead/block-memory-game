@@ -444,7 +444,7 @@
 
       <div class="ready-meta">
         <span>{modeNames[mode]} Mode</span>
-        <span>{currentConfig.activeCount} cubes</span>
+        <span>Level {level}</span>
         <span>Best {bestScore}</span>
       </div>
     </section>
@@ -452,7 +452,7 @@
     <section class="screen board-screen" aria-label="Preview board">
       <div class="screen-label" aria-live="polite">
         <span>Memorize</span>
-        <strong>{currentConfig.activeCount} cubes</strong>
+        <strong>Watch the grid</strong>
       </div>
       <div
         class="board phase-preview"
@@ -491,7 +491,7 @@
     <section class="screen pattern-screen" aria-label="Pattern answer">
       <div class="screen-label">
         <span>Rebuild</span>
-        <strong>{selectedCount}/{currentConfig.activeCount} selected</strong>
+        <strong>{selectedCount} selected</strong>
       </div>
       <div
         class="board phase-input"

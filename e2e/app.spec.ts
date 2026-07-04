@@ -56,6 +56,7 @@ test("starts in count mode and can switch to pattern training", async ({ page })
   await expect(page.getByRole("heading", { name: "Block Memory" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
   await expect(page.getByText("Count Mode")).toBeVisible();
+  await expect(page.getByText(/\b4 cubes\b/i)).toHaveCount(0);
   await expect(page.locator(".board")).toHaveCount(0);
   await expectViewportCanvas(page);
 
@@ -64,6 +65,7 @@ test("starts in count mode and can switch to pattern training", async ({ page })
 
   await expect(page.getByText("Pattern Mode")).toBeVisible();
   await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
+  await expect(page.getByText(/\b3 cubes\b/i)).toHaveCount(0);
 });
 
 test("shows active blocks immediately after start", async ({ page }) => {
@@ -72,6 +74,7 @@ test("shows active blocks immediately after start", async ({ page }) => {
   await page.getByRole("button", { name: "Start" }).click();
 
   await expect(page.getByText("Memorize").first()).toBeVisible();
+  await expect(page.locator(".board-screen .screen-label")).not.toContainText(/\b4 cubes\b/i);
   await expect(page.getByRole("button", { name: "Submit" })).toHaveCount(0);
   await expect(page.locator(".block.is-active")).toHaveCount(4);
   await expectViewportCanvas(page);
@@ -103,8 +106,10 @@ test("keeps pattern recall board and submit inside the viewport", async ({ page 
   await page.getByRole("tab", { name: "Pattern" }).click();
   await page.getByRole("button", { name: "Start" }).click();
   await expect(page.locator(".block.is-active")).toHaveCount(3);
+  await expect(page.locator(".board-screen .screen-label")).not.toContainText(/\b3 cubes\b/i);
 
   await expect(page.getByRole("button", { name: "Submit" })).toBeVisible({ timeout: 5000 });
+  await expect(page.locator(".pattern-screen .screen-label")).not.toContainText(/\d+\/\d+\s+selected/i);
   await expectViewportCanvas(page);
   await expectInsideViewport(page, ".pattern-screen .board");
   await expectInsideViewport(page, ".submit-button");
